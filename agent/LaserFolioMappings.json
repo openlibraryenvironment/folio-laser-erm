@@ -1,0 +1,34 @@
+{
+  "laserFolioMappings": [
+    {
+      "license.status": {
+        "current": {
+          "license.status": "active"
+        },
+        "in_progress": {
+          "license.status": "in_negotiation"
+        },
+        "retired": {
+          "license.status": "expired"
+        }
+      }
+    },
+    {
+      "subscription.status": {
+        "current": {
+          "agreement.status": "active"
+        },
+        "in_negotiation": {
+          "agreement.status": "in_negotiation"
+        },
+        "expired": {
+          "agreement.status": "closed",
+          "agreement.reasonForClosure": "ceased"
+        },
+        "intended": {
+          "agreement.status": "in_negotiation"
+        }
+      }
+    }
+  ]
+}
