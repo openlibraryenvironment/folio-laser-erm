@@ -9,6 +9,7 @@ import groovy.grape.Grape
 
 import org.ini4j.*;
 import groovy.json.JsonOutput;
+import java.util.regex.*;
 
 /**
  * This class controls the synchronisation of a FOLIO tenant Licenses/Agreements with a given 
@@ -21,36 +22,31 @@ import groovy.json.JsonOutput;
  * back to the source license.
  */
 
-if ( args.length == 0 ) {
-  println("usage: process.groovy {laser_cfg_name}");
-  system.exit(1);
-}
-else {
-  println("Process config ${args[0]}");
-}
-
-// Replace with args[0]
-// String laser_cfg='hbz'
-String laser_cfg=args[0]
-
 Wini ini = new Wini(new File(System.getProperty("user.home")+'/.laser/credentials'));
 
-String url = ini.get(laser_cfg, 'url', String.class);
-String secret = ini.get(laser_cfg, 'secret', String.class);
-String token = ini.get(laser_cfg, 'token', String.class);
-String prefix = ini.get(laser_cfg, 'refprefix', String.class) ?: 'LAS:eR#';
-String laserIdentifier = ini.get(laser_cfg, 'laserIdentifier', String.class);
-String identifierType = ini.get(laser_cfg, 'identifierType', String.class);
+String url = ini.get('hbz', 'url', String.class);
+String secret = ini.get('hbz', 'secret', String.class);
+String token = ini.get('hbz', 'token', String.class);
+String prefix = ini.get('hbz', 'refprefix', String.class) ?: 'LAS:eR#';
+String laserIdentifier = ini.get('hbz', 'laserIdentifier', String.class);
+String identifierType = ini.get('hbz', 'identifierType', String.class);
 
-String folioURL = ini.get(laser_cfg, 'folioURL', String.class)
-String folioTenant = ini.get(laser_cfg, 'folioTenant', String.class)
-String folioUser = ini.get(laser_cfg, 'folioUser', String.class)
-String folioPass = ini.get(laser_cfg, 'folioPass', String.class)
+// Configurable naming template
+String nameTemplate = ini.get('hbz', 'nameTemplate', String.class) ?: '<name> (<prefix><guid>)'
+
+// Can be configured on an individual basis
+String licenseNameTemplate = ini.get('hbz', 'licenseNameTemplate', String.class) ?: nameTemplate
+String agreementNameTemplate = ini.get('hbz', 'agreementNameTemplate', String.class) ?: nameTemplate
+String packageNameTemplate = ini.get('hbz', 'packageNameTemplate', String.class) ?: "Pkg for ${agreementNameTemplate}"
+
+String folioURL = ini.get('hbz', 'folioURL', String.class)
+String folioTenant = ini.get('hbz', 'folioTenant', String.class)
+String folioUser = ini.get('hbz', 'folioUser', String.class)
+String folioPass = ini.get('hbz', 'folioPass', String.class)
 
 
 // LaserClient hides all the detail of how to fetch [lists of] licenses and subscriptions from LAS:eR API
 LaserClient lc = new LaserClient(url, secret, token, laserIdentifier, identifierType,'ZBW');
-
 // FolioClient hides all the details of how to upsert (Create, update, find) agreements and licenses using the FOLIO API
 FolioClient fc = new FolioClient(folioURL, folioTenant, folioUser, folioPass);
 
@@ -74,13 +70,24 @@ private void upsertPickListValuesOneByOne(String categoryId, Map ref, FolioClien
 if ( 1==1 ) {
 
   // We grab properties and refdata from the LAS:eR endpoints
-  ArrayList propertiesList = lc.getProperties()
-  propertiesList.removeIf({property -> (property.scope != "License Property")})
-  println("Properties from LAS:eR API: ${propertiesList}")
+  ArrayList propertiesList = []
+  try {
+    propertiesList = lc.getProperties()
+    propertiesList.removeIf({property -> (property.scope != "License Property")})
+    println("Properties from LAS:eR API: ${propertiesList}")
+  } catch (Exception e) {
+    println("FATAL ERROR fetching License properties from LAS:eR: ${e.message}")
+  }
 
+  ArrayList refdata = []
+  try {
+    refdata = lc.getRefdata()
+    println("RefData from LAS:eR API: ${refdata}")
+  } catch (Exception e) {
+    println("FATAL ERROR fetching refdata from LAS:eR: ${e.message}")
+  }
 
-  ArrayList refdata = lc.getRefdata()
-  println("RefData from LAS:eR API: ${refdata}")
+  
 
 
   // This closure will do the actual "walk-the-tree" part, importing all terms and refdata needed into FOLIO
@@ -92,11 +99,13 @@ if ( 1==1 ) {
     
       println("Property on LAS:eR license: ${property}")
       ArrayList tempProps = [] + props
-      tempProps.removeIf{tempProp -> tempProp.token != property.name}
+      tempProps.removeIf{tempProp -> tempProp.token != property.token}
       // Check the property exists and was passed from LAS:eR's endpoint.
       if (tempProps[0]) {
         Map laserProperty = tempProps[0]
         println("Matched property from endpoint: ${laserProperty}, looking up in FOLIO")
+
+        println("Comparing LAS:eR Property from endpoint to laser property on license")
 
         // Now we check if a term with the right name exists in FOLIO
         Map folioTerm = fc.lookupTerm("${prefix}${laserProperty.token}")
@@ -108,13 +117,9 @@ if ( 1==1 ) {
           // The term does not yet exist
           println("No matching term found in FOLIO, creating")
 
-          // If the term is of type other than refdata or date, create immediately
-          // TODO ( We don't currently have Date type custprops)
-          if (laserProperty.type.toLowerCase() != "refdata" && laserProperty.type.toLowerCase() != "date") {
-            
-            // Create term
+          // If the term is of type other than refdata, create immediately
+          if (laserProperty.type.toLowerCase() != "refdata") {
             fc.createTerm(prefix, laserProperty)
-
           } else {
             // We must check the refdata endpoint output, and from that we can cross reference refdataCategories like we did for properties
             ArrayList tempRefs = [] + refs
@@ -144,13 +149,9 @@ if ( 1==1 ) {
               }
 
               // At this stage we have all of the refdata categories and values in place
-              // we just need to create the term with the right category
-
-              if (laserProperty.type.toLowerCase() != "date") {
-                fc.createTerm(prefix, laserProperty, folioRefCat)
-              } else {
-                println("Warning, FOLIO does not yet accept custom properties with type \"Date\"")
-              }
+              // we just need to create the term with the right category             
+              fc.createTerm(prefix, laserProperty, folioRefCat)
+              
 
             } else {
               println("No LAS:eR Refdata category match found for ${laserProperty.refdataCategory}")
@@ -158,7 +159,7 @@ if ( 1==1 ) {
           }
         }
       } else {
-        println("No LAS:eR Property match found for ${property.name}")
+        println("No LAS:eR Property match found for ${property.token}")
       }
   }.curry( propertiesList, refdata );
 
@@ -171,10 +172,8 @@ if ( 1==1 ) {
     // Import all terms, refdata categories and refdata values needed for custom properties
     license.properties.each(importAllTermsAndRefdata)
 
-    println("License properties: ${license.properties}")
-
     // Create or update a corresponding license in FOLIO
-    def folio_license = fc.upsertLicense(prefix,license)
+    def folio_license = fc.upsertLicense(licenseNameTemplate, prefix, license)
 
     // If the create/update worked OK
     if ( folio_license ) {
@@ -191,11 +190,21 @@ if ( 1==1 ) {
           // Write out a KBART file that represents the subscription
           // def sub_kbart = lc.generateKBART(subscription);
         
+          Map packageNameData = [
+            name: subscription.name,
+            prefix: prefix,
+            startDate: subscription.startDate,
+            guid: subscription.globalUID
+          ]
+          
+          String generated_package_name = fc.pm.createCalculatedNameFromTemplate(packageNameTemplate, packageNameData)
+
+          String generated_file_name = new String("pkg_for_LAS:eR${subscription.globalUID}")
+          println("Generated Package Name ${generated_package_name}")
+
           // generate a json format file that describes the package - use the json format defined here
           // https://github.com/folio-org/mod-agreements/blob/master/service/src/integration-test/resources/packages/mod-agreement-package-import-sample.json
-          String generated_package_name = new String("Pkg for ${subscription.calculatedType} ${subscription.name} (${prefix}${subscription.globalUID})")
-          println("Generated Package Name ${generated_package_name}")
-          def sub_pkg = lc.generateFOLIOPackageJSON(generated_package_name, subscription);
+          def sub_pkg = lc.generateFOLIOPackageJSON(generated_package_name, generated_file_name, subscription);
           
           // We only want to create a package here if it contains contentItems
           def folio_pkg
@@ -207,9 +216,9 @@ if ( 1==1 ) {
           // create or update an Agreement to represent that sub, and link it to the parent LAS:eR title
           if (folio_pkg) {
             println("      -> custom package for LAS:eR ${sub_entry.globalUID} mapped to FOLIO package ${folio_pkg.id}");
-            fc.upsertSubscription(prefix, subscription, folio_license.id, folio_pkg.id);
+            fc.upsertSubscription(agreementNameTemplate, prefix, subscription, folio_license.id, folio_pkg.id);
           } else {
-            fc.upsertSubscription(prefix, subscription, folio_license.id);
+            fc.upsertSubscription(agreementNameTemplate, prefix, subscription, folio_license.id);
           }
         } catch (Exception e) {
           println("FATAL ERROR: Problem processing subscription, skipping: ${e.message}")
@@ -224,11 +233,16 @@ if ( 1==1 ) {
   }.curry( propertiesList, refdata );
 
   // Due to the way groovy closures work, the actual import is done at the end here.
-  lc.processLicenses( work )
+  try {
+    lc.processLicenses( work )
+  } catch (Exception e) {
+    println("FATAL ERROR, something went wrong with license processing: ${e.message}")
+  }
+  
 }
 // If we're ignoring the license processing then we end up in the below bracket
- else {
-   println("Warning, license processing is turned OFF")
+else {
+  println("Warning, license processing is turned OFF")
 
 }
 // All done

@@ -1,8 +1,4 @@
-# folio-laser-erm
-An stand-between agent that acts to synchronize a Laser organisation/tenant with FOLIO agreements/licenses without causing an implicit dependency in either system
-
-
-# About
+# README
 
 The process contained here is designed to pull data from LAS:eR and insert it into FOLIO, whilst sitting outside of both.
 

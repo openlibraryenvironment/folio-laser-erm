@@ -27,6 +27,9 @@
         },
         "intended": {
           "agreement.status": "in_negotiation"
+        },
+        "ordered": {
+          "agreement.status": "requested"
         }
       }
     }

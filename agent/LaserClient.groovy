@@ -6,7 +6,6 @@ import static groovy.json.JsonOutput.*
 import groovy.json.JsonOutput
 import groovy.util.slurpersupport.GPathResult
 import org.apache.log4j.*
-import java.text.SimpleDateFormat
 import java.io.File;
 import javax.crypto.spec.SecretKeySpec
 import javax.crypto.Mac
@@ -18,6 +17,8 @@ import static groovyx.net.http.HttpBuilder.configure
 import au.com.bytecode.opencsv.CSVReader
 import au.com.bytecode.opencsv.CSVWriter
 
+import java.time.LocalDateTime
+import java.time.LocalDate
 
 
 public class LaserClient {
@@ -66,6 +67,7 @@ public class LaserClient {
     def result = http.get {
       request.uri.path = '/api/v0/licenseList'
       request.headers['x-authorization'] = "hmac $token:::$auth,hmac-sha256"
+      request.accept = "application/json"
       request.uri.query = [
         q:identifierType,
         v:identifier
@@ -98,6 +100,7 @@ public class LaserClient {
 
     def result = http.get {
       request.uri.path = '/api/v0/propertyList'
+      request.accept = "application/json"
       request.headers['x-authorization'] = "hmac $token:::$auth,hmac-sha256"
       response.when(200) { FromServer fs, Object body ->
         println("OK");
@@ -122,6 +125,7 @@ public class LaserClient {
 
     def result = http.get {
       request.uri.path = '/api/v0/refdataList'
+      request.accept = "application/json"
       request.headers['x-authorization'] = "hmac $token:::$auth,hmac-sha256"
       response.when(200) { FromServer fs, Object body ->
         println("OK");
@@ -149,6 +153,7 @@ public class LaserClient {
 
     http.get {
       request.uri.path = '/api/v0/license'
+      request.accept = "application/json"
       request.headers['x-authorization'] = "hmac $token:::$auth,hmac-sha256"
       request.uri.query = [
         q:'globalUID',
@@ -185,6 +190,7 @@ public class LaserClient {
 
     http.get {
       request.uri.path = '/api/v0/subscription'
+      request.accept = "application/json"
       request.headers['x-authorization'] = "hmac $token:::$auth,hmac-sha256"
       request.uri.query = [
         q:'globalUID',
@@ -220,20 +226,20 @@ public class LaserClient {
     out_writer.writeNext((String[])(['publication_name','col','col']))
     subscription.packages.each { pkg ->
       pkg.issueEntitlements.each { ie ->
-        out_writer.writeNext((String[])([ie.tipp.title.title, ie.tipp.title.type ]))
+        out_writer.writeNext((String[])([ie.tipp.title.title, ie.tipp.title.medium ]))
       }
     }
     out_writer.close()
   }
 
-  /** THIS IS WORK IN PROGRESS */
-  def generateFOLIOPackageJSON(String generated_subscription_name, Map subscription) {
+  def generateFOLIOPackageJSON(String generated_package_name, String generated_file_name, Map subscription) {
     def pkg_data = [
       "header": [
          "dataSchema": [
            "name": "mod-agreements-package",
            "version": "1.0"
-         ]
+         ],
+         "trustedSourceTI": "true"
        ],
        "records": [
        ]
@@ -248,7 +254,7 @@ public class LaserClient {
     pkg_data.records.add([
       "source": "LAS:eR",
       "reference": subscription.globalUID,
-      "name": generated_subscription_name,
+      "name": generated_package_name,
       // "packageProvider": [
       //   "name": "provider"
       // ],
@@ -259,37 +265,33 @@ public class LaserClient {
     subscription.packages.each { pkg ->
       // Iterate over the titles in the package and add a content item for each one
       pkg.issueEntitlements.each { ie ->
+
+      ArrayList coverage = buildCoverageStatements(ie.coverages);
+
         content_items.add([
           //"depth": null,
-          //"accessStart": null,
-          // "coverage": [
-          //   [
-          //     "startDate": null,
-          //     "startVolume": null,
-          //     "startIssue": null,
-          //     "endDate": null,
-          //     "endVolume": null,
-          //     "endIssue": null,
-          //   ]
-          // ],
+          "accessStart": dealWithLaserDate(ie.accessStartDate),
+          "accessEnd": dealWithLaserDate(ie.accessEndDate),
+          "coverage": coverage,
           "platformTitleInstance": [
             "platform": ie.tipp.platform.name,
             "platform_url": ie.tipp.platform.primaryUrl,
             "url": ie.tipp.hostPlatformURL,
             "titleInstance": [
               "name": ie.tipp.title.title,
-              "identifiers":ie.tipp.title.identifiers
-            ],
-            "type": ie.tipp.title.type
+              "identifiers":ie.tipp.title.identifiers,
+              "type": ie.tipp.title.medium,
+              "subtype": "electronic",
+            ]
           ]
         ])
       }
     }
 
-    File pkg_file = new File (pathGen(context, 'current', generated_subscription_name));
+    File pkg_file = new File (pathGen(context, 'current', generated_file_name));
 
     if ( pkg_file.exists() ) {
-      File old_location = new File (pathGen(context, 'previous', generated_subscription_name));
+      File old_location = new File (pathGen(context, 'previous', generated_file_name));
       if ( old_location.exists() )
         old_location.delete()
       old_location << pkg_file
@@ -310,6 +312,41 @@ public class LaserClient {
     }
 
     return pathString;
+  }
+
+  private ArrayList buildCoverageStatements(ArrayList ieCoverages) {
+    ArrayList coverageStatements = []
+    ieCoverages.each{ ieCoverage ->
+
+      def startDate = dealWithLaserDate(ieCoverage.startDate)
+      def endDate = dealWithLaserDate(ieCoverage.endDate)
+      
+      Map coverageStatement = [
+        startDate: startDate,
+        endDate: endDate,
+        startVolume: ieCoverage.startVolume,
+        endVolume: ieCoverage.endVolume,
+        startIssue: ieCoverage.startIssue,
+        endIssue: ieCoverage.endIssue
+      ]
+      coverageStatements << coverageStatement
+    }
+
+    return coverageStatements;
+  }
+
+  private String dealWithLaserDate(String laserDate) {
+    String dateOutput = null
+    if (laserDate != null) {
+      try {
+        LocalDateTime laserDateLocalDateTime = LocalDateTime.parse(laserDate)
+        LocalDate laserDateLocalDate = laserDateLocalDateTime.toLocalDate()
+        dateOutput = laserDateLocalDate.toString()
+      } catch (Exception e) {
+        println("Warning: failure parsing LAS:eR Date ${laserDate}: ${e.message}")
+      }
+    }
+    return dateOutput;
   }
 
 }

@@ -33,7 +33,7 @@ public class FolioClient {
     this.password = password;
   }
 
-  ProcessingMethods pm = new ProcessingMethods();
+  ProcessingMethods pm = new ProcessingMethods(this.url, this.tenant, this.user, this.password, this);
 
   def login() {
     def postBody = [username: this.user, password: this.password]
@@ -71,280 +71,18 @@ public class FolioClient {
       login()
   }
 
-  private boolean laserInternal(String laserIsPublicValue) {
-    boolean internal = true;
-    if (laserIsPublicValue == "Yes") {
-      internal = false;
-    }
-    return internal;
-  }
-
-  private String noteParagraphJoiner(String note, String paragraph) {
-    // The paragraph information for custom properties will for now be stored alongside the note in FOLIO's internalNote field, with a delimiter defined below
-    String delimiter = " :: "
-
-    if (note != null && paragraph != null) {
-      return note << delimiter << paragraph;
-    } else if (note == null && paragraph == null) {
-      return null;
-    } else if (note == null) {
-      return paragraph;
-    } else {
-      return note;
-    }
-  }
-
-  private ArrayList buildPeriodList(Map subscription) {
-    println("buildPeriodList ::${subscription.globalUID}")
-
-    if (subscription.startDate == null) {
-      throw new RuntimeException ("There is no startDate for this subscription")
-    }
-
-    def folioAgreement = lookupAgreement(subscription.globalUID)
-    ArrayList periodList = []
-
-    if (folioAgreement) {
-      // We already have an agreement, so the period will need updating
-      Map deleteMap = [
-        id: folioAgreement.periods?.get(0)?.get('id'),
-        _delete: true
-      ]
-      periodList.add(deleteMap)
-    }
-
-    Map newPeriod = [
-      startDate: subscription.startDate,
-      endDate: subscription.endDate
-    ]
-
-    periodList.add(newPeriod)
-
-  return periodList;
-
-  }
-
-  private boolean comparePropertyValues(def folioProperty, def laserProperty, boolean isRefdata) {
-    // This method takes in two properties, one from FOLIO and one from LAS:eR and compares several fields to check whether all the data is the same
-    // It returns true if they are the same, false if they differ
-    println("Comparing FOLIO and LAS:eR properties :: refdata: ${isRefdata}")
-
-    if (folioProperty == null) {
-      println("FOLIO property does not exist, so skip comparison")
-      return false;
-    }
-
-    // Check values are equal
-    if (isRefdata == true) {
-      println("Comparing FOLIO value: ${folioProperty?.value?.value?.get(0)} to LAS:eR value: ${pm.snakeCaser(laserProperty.value)}")
-      // Refdata is sent by LAS:eR in label form, so we check values in snake case
-      // Also value is saved in an array of objects in FOLIO, hence value.value[0]
-      if(folioProperty?.value?.value?.get(0) != pm.snakeCaser(laserProperty.value)) {
-        return false;
-      }
-    } else {
-      println("Comparing FOLIO value: ${folioProperty?.value?.get(0)} to LAS:eR value: ${laserProperty.value}")
-      if (folioProperty?.value?.get(0) != laserProperty.value) {
-        return false;
-      }
-    }
-
-    // Check internal values match up
-    // folioProperty.internal returns [bool]
-    boolean folioInternal = Boolean.valueOf(folioProperty.internal?.get(0))
-    boolean laserInternal = laserInternal(laserProperty.isPublic)
-    println("Comparing FOLIO internal: ${folioInternal} to LAS:eR internal: ${laserInternal}")
-    if (folioInternal != laserInternal) {
-      return false
-    }
-
-    //Check note/paragraph fields match up
-    String folioNote = folioProperty.note?.get(0)
-    String laserNote = noteParagraphJoiner(laserProperty.note, laserProperty.paragraph)
-    println("Comparing FOLIO note: ${folioNote} to LAS:eR note: ${laserNote}")
-    if (folioNote != laserNote) {
-      return false
-    }
-
-    //If everything matches then we return true
-    return true
-  }
-
-
-  def makeCustomPropertyMap(String prefix, Map license) {
-    // This method should be called inside a try/catch block
-    println("makeCustomPropertyMap(${license.reference}...)");
-
-    // check if this license already exists in FOLIO
-    def folioLicense = lookupLicense(license.globalUID)
-
-    def result = [:];
-
-    // First port of call is to attempt to match everything coming in from the import into FOLIO
-    license.properties.each({property ->
-      println("PROPERTY ${property}")
-
-      try {
-        // We grab the in-FOLIO term supposedly matching the license property
-
-        // We .toString() to avoid a weird null value
-        def folioProperty = folioLicense?.customProperties?.get("${prefix}${property.name}".toString())
-
-
-        // This part checks whether the term already exists on the FOLIO license.
-        // If it does, we will need to delete the existing custom property information and replace with new information
-        ArrayList custPropList = []
-        if (folioProperty) {
-          // We already have something mapped for this property -- update
-          Map deleteMap = [
-            id: folioProperty.id?.get(0),
-            _delete: true
-          ]
-          custPropList.add(deleteMap)
-        }
-
-        // Lookup the value and term in FOLIO
-        def term = lookupTerm("${prefix}${property.name}")
-        if (term == null) {
-          throw new RuntimeException("Could not find term ${prefix}${property.name}")
-        }
-
-        if (term.type == "com.k_int.web.toolkit.custprops.types.CustomPropertyRefdata") {
-          // If we're in this block we're dealing with a refdata property
-
-          boolean matches = comparePropertyValues(folioProperty, property, true)
-
-          if (!matches) {
-            println("LAS:eR property differs from what we have in FOLIO already, creating/updating")
-
-            def refdata = lookupPickList("${prefix}${property.refdataCategory}")
-            String categoryId
-            if (refdata == null) {
-              throw new RuntimeException("Could not find pickList ${prefix}${property.refdataCategory}")
-            } else {
-              categoryId = refdata.id
-            }
-            // lookupPickListValue doesn't actually return the list of values, it returns the category with an empty values list.
-            def catValues = refdata?.values
-            catValues.removeIf({value -> value.value != pm.snakeCaser(property.value)})
-            def value
-            switch (catValues.size()) {
-              case 1:
-                value = catValues[0]
-                break;
-              case 0:
-                break;
-              default:
-                throw new RuntimeException("Multiple pickListValues found matching ${property.value}")
-                break;
-            }
-            
-            if (value == null) {
-              throw new RuntimeException("Could not find pickListValue ${property.value}")
-            }
-
-            boolean internal = laserInternal(property.isPublic)
-            String internalNote = noteParagraphJoiner(property.note, property.paragraph)
-
-            Map custPropFields = [
-              internal: internal,
-              note: internalNote,
-              value: value,
-              type: term
-            ]
-
-            custPropList.add(custPropFields)
-            // Build property entry in result
-            String mappingKey = "${prefix}${property.name}"
-            result[mappingKey] = custPropList
-
-            println("Added property to makeCustomPropertyMap result")
-
-          } else {
-            // If the LAS:eR license property matches what we have in FOLIO we move on
-            println("LAS:eR property matches what we have in FOLIO already, skipping")
-          }
-          
-        } else {
-          // If we're in this block we're not dealing with a refdata property
-
-          boolean matches = comparePropertyValues(folioProperty, property, false)
-
-          if (!matches) {
-            println("LAS:eR property differs from what we have in FOLIO already, creating/updating")
-            boolean internal = laserInternal(property.isPublic)
-            String internalNote = noteParagraphJoiner(property.note, property.paragraph)
-
-            Map custPropFields = [
-              internal: internal,
-              note: internalNote,
-              value: property.value,
-              type: term
-            ]
-
-            custPropList.add(custPropFields)
-            // Build property entry in result
-            String mappingKey = "${prefix}${property.name}"
-            result[mappingKey] = custPropList
-
-            println("Added property to makeCustomPropertyMap result")
-
-          } else {
-            // If the LAS:eR license property matches what we have in FOLIO we move on
-            println("LAS:eR term matches what we have in FOLIO already, skipping")
-          }
-        }
-      } catch (Exception e) {
-        println("ERROR Skipping license property: ${e.message}")
-      }
-    })
-
-    // Next port of call is to check every LAS:eR property in FOLIO, and ensure that still exists in the LAS:eR import
-    if (folioLicense != null) {
-      // If the folioLicense doesn't exist we can ignore this step
-      folioLicense.customProperties.each({key, val -> 
-        if (key.startsWith(prefix)) {
-          // This is a laser property, check if it still exists in the import
-          def laserPropertyName = key.replace(prefix, "")
-
-          def licensePropertiesTemp = [] + license.properties
-          licensePropertiesTemp.removeIf({property -> property.name != laserPropertyName})
-          if (licensePropertiesTemp.isEmpty()) {
-            // If the map is empty, that means that the LAS:eR license import does not contain this property
-            println("Warning, LAS:eR import does not contain LAS:eR property: ${laserPropertyName}, removing from FOLIO")
-            String valId = val[0]?.get("id")
-            Map custPropFields = [                           
-              id: valId,
-              _delete: true
-            ]
-            ArrayList custPropList = [custPropFields]
-
-            // Build property entry in result
-            String mappingKey = new String("${key}")
-            result[mappingKey] = custPropList
-          }
-
-        } else {
-          // This is not a LAS:eR property, ignore it
-          println("This is not a LAS:eR property, ignoring")
-        }
-      })
-    }
-
-    if (result.isEmpty()) {
-      throw new RuntimeException("makeCustomPropertyMap found no customProperties")
-    }
-
-    return result;
-  }
-
-
-  def upsertLicense(String prefix, Map license) {
+  def upsertLicense(String template, String prefix, Map license) {
     println("upsertLicense(${license.reference}...)");
     def result = null;
     ensureLogin();
     try {
-      String calculated_title = "${license.reference} (${prefix}${license.globalUID})".toString()
+      Map calculatedTitleData = [
+        name: license.reference,
+        guid: license.globalUID,
+        prefix: prefix,
+        startDate: license.startDate
+      ]
+      String calculated_title = pm.createCalculatedNameFromTemplate(template, calculatedTitleData)
 
       // Lookup license in FOLIO.
       def existing_license = lookupLicense(license.globalUID)
@@ -366,6 +104,7 @@ public class FolioClient {
   }
 
   def createLicense(String calculated_title, Map license, String prefix) {
+
     def result = null;
     println("createLicense(${calculated_title}...)");
     ensureLogin();
@@ -378,7 +117,7 @@ public class FolioClient {
 
     Map customProperties = [:]
     try {
-      customProperties = makeCustomPropertyMap(prefix, license)
+      customProperties = pm.makeCustomPropertyMap(prefix, license)
     } catch (Exception e) {
       println("Warning: ${e.message}, skipping custom properties.")
     }
@@ -422,7 +161,7 @@ public class FolioClient {
       }
 
     } catch (Exception e) {
-      println("ERROR: Skipping license creation: ${e.message}")
+      println("FATAL ERROR: Skipping license creation: ${e.message}")
     }
     
     
@@ -432,6 +171,7 @@ public class FolioClient {
 
 
   def updateLicense(String calculated_title, Map license, String prefix, String licenseId) {
+
     def result = null;
     println("updateLicense(${calculated_title}...)");
     ensureLogin();
@@ -444,7 +184,7 @@ public class FolioClient {
     Map customProperties = [:]
 
     try {
-      customProperties = makeCustomPropertyMap(prefix, license)
+      customProperties = pm.makeCustomPropertyMap(prefix, license)
     } catch ( Exception e ) {
       println("Warning: Could not create custom property map: ${e.message}}")
     }
@@ -464,6 +204,7 @@ public class FolioClient {
 
 
     def requestBody = [
+      name: calculated_title,
       customProperties: customProperties,
       startDate: license.startDate,
       endDate: license.endDate
@@ -473,7 +214,7 @@ public class FolioClient {
       requestBody['status'] = statusString
     }
 
-    println("License PUT Request body: ${JsonOutput.prettyPrint(JsonOutput.toJson(requestBody))}")
+    println("License PUT Request body: ${pm.prettyPrinter(requestBody)}")
 
     http.put {
       request.uri.path = "/licenses/licenses/${licenseId}"
@@ -546,29 +287,6 @@ public class FolioClient {
     return result;
   }
 
-
-  def upsertTerm(String prefix, Map property) {
-    println("upsertTerm(${property.token}...)");
-    def result = null;
-    ensureLogin();
-
-    try {
-      def existing_term = lookupTerm("${prefix}${property.token}")
-      if ( existing_term == null ) {
-        result = createTerm(prefix, property);
-      }
-      else {
-        println("Located existing record for ${property.token} - upsert");
-        result = existing_term
-      }
-    }
-    catch ( Exception e ) {
-      println("Skip ${property.token} :: ${e.message}");
-    }
-
-    return result;
-  }
-
   def createTerm(String prefix, Map property, Map category = null) {
     def result = null;
     println("createTerm(${prefix}${property.token}...)");
@@ -593,12 +311,17 @@ public class FolioClient {
     if (property.refdataCategory) {
       type = "Refdata"
     }
-
-    Map refdataCategory = null
+    
     if (type == "Number") {
       type = "Decimal"
-    } // TODO Date type not supported in FOLIO yet
 
+    } // TODO Date type not supported in FOLIO yet
+    if (type == "Date") {
+      type = "Text"
+    }
+
+    Map refdataCategory = null
+    // Our process SHOULD ensure that the correct refdata category exists before creating the term
     if (type?.toLowerCase() == "refdata") {
       Map folioRefCat = lookupPickList("${prefix}${property.refdataCategory}")
       if (folioRefCat) {
@@ -661,7 +384,7 @@ public class FolioClient {
       request.headers['X-Okapi-Token']=session_ctx.token
 
       request.uri.query = [
-        match:'name',
+        filters:"name==${key}",
         perPage:10,
         sort:'name',
         term:key,
@@ -951,19 +674,26 @@ public class FolioClient {
     return result;
   }
 
-  def upsertSubscription(String prefix, Map subscription, String folio_license_id, String folio_pkg_id = null) {
-    println("upsertSubscription(${prefix}, ${subscription.globalUID}(${subscription.name})..., ${folio_license_id}");
-    String calculated_name = "${subscription.name} (${prefix}${subscription.globalUID})".toString()
+  def upsertSubscription(String template, String prefix, Map subscription, String folio_license_id, String folio_pkg_id = null) {
+    Map calculatedTitleData = [
+      name: subscription.name,
+      guid: subscription.globalUID,
+      prefix: prefix,
+      startDate: subscription.startDate
+    ]
+    String calculated_title = pm.createCalculatedNameFromTemplate(template, calculatedTitleData)
+    println("upsertSubscription(${calculated_title}..., ${folio_license_id}");
+
 
     def existing_subscription = lookupAgreement(subscription.globalUID)
 
     if ( existing_subscription ) {
       println("Located existing subscription ${existing_subscription.id} - update");
-      updateAgreement(calculated_name,subscription, folio_license_id, folio_pkg_id, existing_subscription.id);
+      updateAgreement(calculated_title,subscription, folio_license_id, folio_pkg_id, existing_subscription.id);
     }
     else {
       println("No subscription found - create");
-      createAgreement(calculated_name,subscription, folio_license_id, folio_pkg_id);
+      createAgreement(calculated_title,subscription, folio_license_id, folio_pkg_id);
     }
   }
 
@@ -1038,7 +768,7 @@ public class FolioClient {
     }
 
     try {
-      ArrayList periods = buildPeriodList(subscription)
+      ArrayList periods = pm.buildPeriodList(subscription)
       Map statusMappings = pm.getAgreementStatusMap(subscription.status)
       String statusString = statusMappings.get('agreement.status')
       String reasonForClosure = null
@@ -1084,14 +814,14 @@ public class FolioClient {
 
       return result;
     } catch (Exception e) {
-      println("ERROR: Skipping agreement creation: ${e.message}")
+      println("FATAL ERROR: Skipping agreement creation: ${e.message}")
     }
     
   }
 
   def updateAgreement(String calculated_name, Map subscription, String folio_license_id, String folio_pkg_id, String agreementId) {
     def result = null;
-    println("createAgreement(${calculated_name},${subscription.name},${folio_license_id}...)");
+    println("updateAgreement(${calculated_name},${subscription.name},${folio_license_id}...)");
     ensureLogin();
 
     // lookup
@@ -1099,10 +829,34 @@ public class FolioClient {
       request.uri = url
     }
 
+    ArrayList linkedLicenses = []
+    
+    try {
+      Map existing_controlling_license_data = pm.lookupExistingAgreementControllingLicense(subscription.globalUID)
+      println("Comparing license id: ${folio_license_id} to existing controlling license link: ${existing_controlling_license_data.existingLicenseId}")
+      if (existing_controlling_license_data.existingLicenseId != folio_license_id) {
+        println("Existing controlling license differs from data harvested from LAS:eR--updating")
+        linkedLicenses = [
+          [
+            id: existing_controlling_license_data.existingLinkId,
+            _delete: true
+          ],
+          [
+            remoteId:folio_license_id,
+            status:'controlling'
+          ]
+        ]
+      } else {
+        println("Existing controlling license matches data harvested from LAS:eR--moving on")
+      }
+    } catch (Exception e) {
+      println("Warning: Cannot update controlling information for agreement: ${e.message}")
+    }
+
     ArrayList periods = []
 
     try {
-      periods = buildPeriodList(subscription)
+      periods = pm.buildPeriodList(subscription)
       // TODO We don't currently allow for changes in packages to make their way into FOLIO
     } catch (Exception e) {
       println("Warning: Cannot update period information for agreement: ${e.message}")
@@ -1122,6 +876,8 @@ public class FolioClient {
     }
 
     Map requestBody = [
+      name: calculated_name,
+      linkedLicenses: linkedLicenses,
       periods: periods
     ]
 
@@ -1130,7 +886,7 @@ public class FolioClient {
       requestBody["reasonForClosure"] = statusMappings.get('agreement.reasonForClosure')
     }
 
-    println("Agreement PUT Request body: ${JsonOutput.prettyPrint(JsonOutput.toJson(requestBody))}")
+    println("Agreement PUT Request body: ${pm.prettyPrinter(requestBody)}")
 
     http.put {
       request.uri.path = "/erm/sas/${agreementId}"
@@ -1158,17 +914,8 @@ public class FolioClient {
   def upsertPackage(String calculated_name, Map pkgdata) {
     println("upsertPackage(${calculated_name},...");
     //  curl -H 'X-OKAPI-TENANT: diku' -H 'Content-Type: application/json' -XPOST 'http://localhost:8080/erm/packages/import' -d '@../service/src/integration-test/resources/packages/mod-agreement-package-import-sample.json'
-    def result
-    def existing_package = lookupPackage(calculated_name)
-
-    if ( existing_package ) {
-      println("Located existing package ${existing_package.id} - update");
-      result = existing_package
-    }
-    else {
-      println("No package found - create");
-      result = createPackage(calculated_name, pkgdata);
-    }
+    def result = createPackage(calculated_name, pkgdata);
+    
     return result;
   }
 
@@ -1189,7 +936,7 @@ public class FolioClient {
       request.headers['X-Okapi-Token']=session_ctx.token
 
       request.uri.query = [
-        match:sortTerm,
+        filters: "${sortTerm}==${calculated_name}",
         perPage:10,
         sort:sortTerm,
         term:calculated_name,
