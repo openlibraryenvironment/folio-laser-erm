@@ -42,7 +42,7 @@ If you wish to configure different templates for differing objects, that is an o
 The general name template defaults to `'<name> (<prefix><guid>)'`, and by default licenses and agreements will use this template, and packages will prepend `"Pkg for "` to the front of the agreement name template.
 
 ## Running
-Once the setup is complete, navigate into the `spike` directory where the `process.groovy` file lives, ensure you have the latest version of the process by running a `git pull`, and run the command `groovy process.groovy`. This will begin the import process.
+Once the setup is complete, navigate into the `agent` directory where the `process.groovy` file lives, ensure you have the latest version of the process by running a `git pull`, and run the command `groovy process.groovy`. This will begin the import process.
 
 Warning: This process is currently only supported on Linux Systems, due to some UTF-8 encoding issues with Windows.
 
@@ -57,7 +57,7 @@ One message in particular to watch out for is `"FATAL ERROR: Skipping agreement/
 This indicates that the mappings file is missing some information it needs in order to map some LAS:eR refdata into FOLIO, see [Mappings](#mappings).
 
 ## Mappings
-This mapping file is located in the `spike` directory and is called `LaserFolioMappings.json`. It takes the form below:
+This mapping file is located in the `agent` directory and is called `LaserFolioMappings.json`. It takes the form below:
 
 ```
 {
