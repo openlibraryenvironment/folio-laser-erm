@@ -40,11 +40,10 @@ public class FolioClient {
     println("attempt login (url=${url} / tenant=${tenant} / user=${user} / pass=${password}) ${postBody}");
 
     def http = configure {
-      request.uri = url
+      request.uri = url + '/bl-users/login'
     }
 
     def result = http.post {
-      request.uri.path='/bl-users/login'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
 
@@ -109,12 +108,6 @@ public class FolioClient {
     println("createLicense(${calculated_title}...)");
     ensureLogin();
 
-    // lookup
-    def http = configure {
-      request.uri = url
-    }
-
-
     Map customProperties = [:]
     try {
       customProperties = pm.makeCustomPropertyMap(prefix, license)
@@ -142,8 +135,12 @@ public class FolioClient {
         endDate: license.endDate
       ]
 
+      // lookup
+      def http = configure {
+        request.uri = url + '/licenses/licenses'
+      }
+
       http.post {
-        request.uri.path = '/licenses/licenses'
         request.headers['X-Okapi-Tenant']=this.tenant;
         request.headers['accept']='application/json'
         request.headers['X-Okapi-Token']=session_ctx.token
@@ -175,11 +172,6 @@ public class FolioClient {
     def result = null;
     println("updateLicense(${calculated_title}...)");
     ensureLogin();
-
-    // lookup
-    def http = configure {
-      request.uri = url
-    }
 
     Map customProperties = [:]
 
@@ -216,8 +208,12 @@ public class FolioClient {
 
     println("License PUT Request body: ${pm.prettyPrinter(requestBody)}")
 
+    // lookup
+    def http = configure {
+      request.uri = url + "/licenses/licenses/${licenseId}"
+    }
+
     http.put {
-      request.uri.path = "/licenses/licenses/${licenseId}"
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -246,11 +242,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + '/licenses/licenses'
     }
 
     http.get {
-      request.uri.path = '/licenses/licenses'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -292,11 +287,6 @@ public class FolioClient {
     println("createTerm(${prefix}${property.token}...)");
     ensureLogin();
 
-    // lookup
-    def http = configure {
-      request.uri = url
-    }
-
     boolean isNotPublic
     if (property.isPublic == "Yes") {
       isNotPublic = false
@@ -334,8 +324,12 @@ public class FolioClient {
 
     }
 
+    // lookup
+    def http = configure {
+      request.uri = url + '/licenses/custprops'
+    }
+
     http.post {
-      request.uri.path = '/licenses/custprops'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -374,11 +368,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + '/licenses/custprops'
     }
 
     http.get {
-      request.uri.path = '/licenses/custprops'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -442,11 +435,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + '/licenses/refdata'
     }
 
     http.post {
-      request.uri.path = '/licenses/refdata'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -478,11 +470,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + '/licenses/refdata'
     }
 
     http.get {
-      request.uri.path = '/licenses/refdata'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -543,11 +534,6 @@ public class FolioClient {
     println("createPickListValue(${refdata.token}, ${categoryId}...)");
     ensureLogin();
 
-    // lookup
-    def http = configure {
-      request.uri = url
-    }
-
     Map postMap = categoryMap
     postMap.values.push(
       [
@@ -556,8 +542,12 @@ public class FolioClient {
       ]
     )
 
+    // lookup
+    def http = configure {
+      request.uri = url + "/licenses/refdata/${categoryId}"
+    }
+
     http.put {
-      request.uri.path = "/licenses/refdata/${categoryId}"
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -586,11 +576,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + "/licenses/refdata/${categoryId}"
     }
 
     http.get {
-      request.uri.path = "/licenses/refdata/${categoryId}"
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -639,11 +628,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + "/${context}/refdata".toString()
     }
 
     http.get {
-      request.uri.path = "/${context}/refdata".toString()
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -704,11 +692,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + '/erm/sas'
     }
 
     http.get {
-      request.uri.path = '/erm/sas'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -750,11 +737,6 @@ public class FolioClient {
     println("createAgreement(${calculated_name},${subscription.name},${folio_license_id}...)");
     ensureLogin();
 
-    // lookup
-    def http = configure {
-      request.uri = url
-    }
-
     // We only add the custom package as an agreement line if the data from folio contained contentItems
     def items
     if (folio_pkg_id) {
@@ -779,8 +761,12 @@ public class FolioClient {
       reasonForClosure = statusMappings.get('agreement.reasonForClosure')
       
 
+      // lookup
+      def http = configure {
+        request.uri = url + '/erm/sas'
+      }
+
       http.post {
-        request.uri.path = '/erm/sas'
         request.headers['X-Okapi-Tenant']=this.tenant;
         request.headers['accept']='application/json'
         request.headers['X-Okapi-Token']=session_ctx.token
@@ -823,11 +809,6 @@ public class FolioClient {
     def result = null;
     println("updateAgreement(${calculated_name},${subscription.name},${folio_license_id}...)");
     ensureLogin();
-
-    // lookup
-    def http = configure {
-      request.uri = url
-    }
 
     ArrayList linkedLicenses = []
     
@@ -888,8 +869,12 @@ public class FolioClient {
 
     println("Agreement PUT Request body: ${pm.prettyPrinter(requestBody)}")
 
+    // lookup
+    def http = configure {
+      request.uri = url + "/erm/sas/${agreementId}"
+    }
+
     http.put {
-      request.uri.path = "/erm/sas/${agreementId}"
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -926,11 +911,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + '/erm/resource/electronic'
     }
 
     http.get {
-      request.uri.path = '/erm/resource/electronic'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
@@ -975,11 +959,10 @@ public class FolioClient {
 
     // lookup
     def http = configure {
-      request.uri = url
+      request.uri = url + '/erm/packages/import'
     }
 
     http.post {
-      request.uri.path = '/erm/packages/import'
       request.headers['X-Okapi-Tenant']=this.tenant;
       request.headers['accept']='application/json'
       request.headers['X-Okapi-Token']=session_ctx.token
